@@ -65,7 +65,6 @@ body {
 .book-meta { flex:1; min-width:0; }
 .book-title { font-size:14px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .book-info { font-size:11px; color:var(--text-muted); margin-top:2px; display:flex; gap:8px; }
-.book-progress { font-size:11px; color:var(--gold); font-weight:600; }
 .item-btn {
   position:absolute; top:4px; width:20px; height:20px; background:none; border:none;
   font-size:12px; cursor:pointer; opacity:0; transition:opacity 0.2s; border-radius:3px;
@@ -156,13 +155,6 @@ body {
 .welcome h2 { font-size:18px; color:var(--green-dark); margin-bottom:10px; }
 .welcome p { font-size:14px; color:var(--text-light); line-height:2.2; }
 
-.page-info {
-  position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:50;
-  font-size:12px; color:var(--text-light); background:var(--panel);
-  padding:5px 16px; border:1.5px solid var(--green-light); border-radius:12px;
-  box-shadow:0 2px 8px var(--shadow); font-weight:500;
-}
-
 /* === MODALS === */
 .modal-overlay {
   position:fixed; inset:0; background:rgba(60,50,30,0.45); z-index:500;
@@ -191,17 +183,6 @@ body {
 .modal-btn.cancel { background:var(--cream); color:var(--text-light); }
 .modal-btn.cancel:hover { background:#f0f8e8; }
 
-.bm-item {
-  display:flex; align-items:center; gap:8px; padding:8px; margin-bottom:4px;
-  background:var(--cream); border:2px solid transparent; border-radius:6px;
-  cursor:pointer; transition:all 0.15s;
-}
-.bm-item:hover { border-color:var(--green-light); background:#f0f8e8; }
-.bm-item .bm-name { flex:1; font-size:13px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.bm-item .bm-pos { font-size:11px; color:var(--text-muted); flex-shrink:0; }
-.bm-item .bm-del { background:none; border:none; color:var(--accent); font-size:14px; cursor:pointer; opacity:0; transition:opacity 0.2s; }
-.bm-item:hover .bm-del { opacity:1; }
-
 /* === LOADING === */
 .loading-overlay {
   position:fixed; inset:0; background:rgba(245,240,232,0.85); z-index:400;
@@ -212,8 +193,6 @@ body {
 @keyframes spin { to { transform:rotate(360deg); } }
 .loading-text { font-size:14px; color:var(--green-dark); font-weight:600; }
 
-/* === BRIGHTNESS === */
-.brightness-overlay { position:fixed; inset:0; background:#000; pointer-events:none; z-index:49; opacity:0; transition:opacity 0.2s; }
 #file-input { display:none; }
 
 /* === TOAST === */
@@ -263,9 +242,6 @@ body {
       <button class="tb-btn" id="next-btn" title="下一页" disabled>▶</button>
       <button class="tb-btn" id="font-sm" title="缩小字号">A-</button>
       <button class="tb-btn" id="font-lg" title="放大字号">A+</button>
-      <button class="tb-btn" id="bookmark-btn" title="书签">🔖</button>
-      <button class="tb-btn" id="jump-btn" title="跳转">↗</button>
-      <button class="tb-btn" id="brightness-btn" title="亮度调节">☀</button>
       <button class="tb-btn" id="close-btn" title="关闭">✕</button>
     </div>
   </div>
@@ -280,7 +256,6 @@ body {
     <div id="docx-viewer" style="display:none"></div>
   </div>
 </div>
-<div class="page-info" id="page-info" style="display:none"></div>
 
 <!-- Loading -->
 <div class="loading-overlay" id="loading">
@@ -288,40 +263,8 @@ body {
   <div class="loading-text" id="loading-text">加载中...</div>
 </div>
 
-<!-- Brightness -->
-<div class="brightness-overlay" id="brightness-overlay"></div>
-
 <!-- Toast -->
 <div class="toast" id="toast"></div>
-
-<!-- Modals -->
-<div class="modal-overlay" id="bookmark-modal">
-  <div class="modal-box">
-    <h3>🔖 书签</h3>
-    <div style="display:flex;gap:6px;margin-bottom:12px;">
-      <input type="text" id="bm-name" placeholder="书签名称（可选）" style="flex:1;">
-      <button class="modal-btn primary" id="bm-add" style="flex-shrink:0;">添加</button>
-    </div>
-    <div id="bookmark-list"></div>
-    <div class="modal-btn-row">
-      <button class="modal-btn cancel" onclick="closeModal('bookmark-modal')">关闭</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="jump-modal">
-  <div class="modal-box">
-    <h3>↗ 跳转到</h3>
-    <label>页码（PDF）</label>
-    <input type="number" id="jump-page" placeholder="输入页码" min="1">
-    <label>百分比（EPUB/DOCX）</label>
-    <input type="number" id="jump-pct" placeholder="1-100" min="0" max="100">
-    <div class="modal-btn-row">
-      <button class="modal-btn primary" id="jump-go">跳转</button>
-      <button class="modal-btn cancel" onclick="closeModal('jump-modal')">取消</button>
-    </div>
-  </div>
-</div>
 
 <div class="modal-overlay" id="edit-modal">
   <div class="modal-box">
@@ -369,8 +312,6 @@ const S = {
   pdfPage: 1,
 
   fontSize: 100,
-  bookmarks: JSON.parse(localStorage.getItem('pr2_bookmarks') || '[]'),
-  brightness: parseInt(localStorage.getItem('pr2_brightness') || '0'),
 };
 
 // ============================================================
@@ -416,7 +357,6 @@ function renderBookList(filter) {
         <div class="book-title">${escHtml(b.name)}</div>
         <div class="book-info">
           <span>${FMT_LABELS[b.format]||b.format}</span>
-          <span class="book-progress">${b.progress > 0 ? Math.round(b.progress)+'%' : '未读'}</span>
         </div>
       </div>
       <button class="item-btn edit" title="编辑">✏</button>
@@ -489,8 +429,8 @@ $('file-input').onchange = async e => {
         data = new TextEncoder().encode(html).buffer;
         fmt = 'docx';
       }
-      const id = await idbAdd({ name, format:fmt, data, progress:0, lastRead:0 });
-      S.books.push({ id, name, format:fmt, progress:0, lastRead:0 });
+      const id = await idbAdd({ name, format:fmt, data, lastRead:0 });
+      S.books.push({ id, name, format:fmt, lastRead:0 });
       added++;
     } catch(err) { console.error(err); showToast('添加失败: '+f.name); }
   }
@@ -520,37 +460,14 @@ async function openEpub(book) {
   });
   S.rendition.themes.fontSize(S.fontSize + '%');
 
-  try { await epubBook.locations.generate(2000); } catch(e) { console.warn('Locations:', e); }
-  const totalChars = epubBook.locations.total || 0;
-  let charsPerPage = 0, prevOffset = 0, skipCount = 0;
-
+  let skipCount = 0;
   S.rendition.on('relocated', loc => {
-    if (skipCount < 1) {
-      const cfi = loc.start.cfi;
-      if (cfi && epubBook.locations.length > 0) prevOffset = epubBook.locations.lengthFromCfi(cfi) || 0;
-      skipCount++; return;
-    }
+    if (skipCount < 1) { skipCount++; return; }
     const cfi = loc.start.cfi;
     if (!cfi) return;
-    const offset = epubBook.locations.length > 0 ? (epubBook.locations.lengthFromCfi(cfi) || 0) : -1;
-    // Calibrate: characters between two consecutive pages
-    if (!charsPerPage && offset > prevOffset) charsPerPage = offset - prevOffset;
-    prevOffset = offset;
-
-    let globalPage, estTotal;
-    if (charsPerPage > 0 && totalChars > 0) {
-      estTotal = Math.round(totalChars / charsPerPage);
-      globalPage = Math.max(1, Math.round(offset / charsPerPage));
-    } else {
-      // Still calibrating — use displayed values
-      globalPage = loc.start.displayed.page;
-      estTotal = loc.start.displayed.total;
-    }
-    const pct = estTotal > 0 ? Math.min(100, Math.round((globalPage / estTotal) * 100)) : 0;
-    S.books[S.curIdx].progress = pct; S.books[S.curIdx].cfi = cfi;
+    S.books[S.curIdx].cfi = cfi;
     const idx = S.curIdx;
-    idbGet(S.books[idx].id).then(f => { if (f) { f.progress = pct; f.cfi = cfi; idbPut(f); } });
-    updatePageInfo(globalPage, estTotal);
+    idbGet(S.books[idx].id).then(f => { if (f) { f.cfi = cfi; idbPut(f); } });
   });
 
   let restored = false;
@@ -560,11 +477,6 @@ async function openEpub(book) {
   }
   if (!restored) {
     await S.rendition.display();
-    S.books[S.curIdx].progress = 0;
-    const full = await idbGet(S.books[S.curIdx].id);
-    if (full) { full.progress = 0; full.cfi = null; await idbPut(full); }
-  } else {
-    S.books[S.curIdx].progress = book.progress || 0;
   }
 
   updateNavState(false, false);
@@ -576,7 +488,7 @@ async function openPdf(book) {
   const viewer = $('pdf-viewer');
   viewer.style.display = 'block'; viewer.innerHTML = '';
   S.pdfDoc = await pdfjsLib.getDocument({ data: book.data }).promise;
-  S.pdfPage = book.progress > 0 ? Math.ceil((book.progress/100)*S.pdfDoc.numPages) : 1;
+  S.pdfPage = book.pdfPage || 1;
   await renderPdfPage(S.pdfPage);
   updateNavState(false, false);
 }
@@ -594,12 +506,9 @@ async function renderPdfPage(num) {
   canvas.style.maxWidth = '100%';
   viewer.appendChild(canvas);
   await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-
-  const pct = (num / S.pdfDoc.numPages) * 100;
-  S.books[S.curIdx].progress = pct;
-  updatePageInfo(num, S.pdfDoc.numPages);
-  const b = S.books[S.curIdx];
-  if (b.id != null) { const f = await idbGet(b.id); if (f) { f.progress = pct; await idbPut(f); } }
+  S.books[S.curIdx].pdfPage = num;
+  const idx = S.curIdx;
+  idbGet(S.books[idx].id).then(f => { if (f) { f.pdfPage = num; idbPut(f); } });
 }
 
 // --- DOCX/TXT ---
@@ -618,14 +527,12 @@ async function openDocx(book) {
     if (t <= 0) return;
     const pct = Math.min(100, (viewer.scrollTop/t)*100);
     S.books[S.curIdx].progress = pct;
-    updatePageInfo(Math.round(pct)+'%', '');
     if (S.books[S.curIdx].id != null) {
       idbGet(S.books[S.curIdx].id).then(f => { if (f) { f.progress = pct; idbPut(f); } });
     }
   };
 
   updateNavState(true, true);
-  updatePageInfo(Math.round(book.progress||0)+'%', '');
 }
 
 // ============================================================
@@ -638,19 +545,12 @@ function updateNavState(prevDisabled, nextDisabled) {
   if (!nextDisabled) $('next-btn').onclick = () => navNext();
 }
 
-function updatePageInfo(a, b) {
-  const el = $('page-info');
-  el.style.display = 'block';
-  el.textContent = b ? `${a} / ${b}` : `${a}`;
-}
-
 function closeReader() {
   if (S.rendition) { try { S.rendition.destroy(); } catch(e) {} S.rendition = null; }
   S.curIdx = -1; S.pdfDoc = null;
   ['epub-viewer','pdf-viewer','docx-viewer'].forEach(id => { const e = $(id); e.style.display = 'none'; e.innerHTML = ''; if (id === 'docx-viewer') e.onscroll = null; });
   $('welcome-screen').style.display = '';
   $('current-book-name').textContent = '未选择书籍';
-  $('page-info').style.display = 'none';
   updateNavState(true, true);
   renderBookList();
 }
@@ -667,7 +567,6 @@ async function openBook(idx) {
     ['epub-viewer','pdf-viewer','docx-viewer'].forEach(id => $(id).style.display = 'none');
     $('docx-viewer').onscroll = null;
     $('current-book-name').textContent = book.name;
-    $('page-info').style.display = 'block';
 
     if (book.format === 'epub') await openEpub(full);
     else if (book.format === 'pdf') await openPdf(full);
@@ -722,118 +621,12 @@ $('font-lg').onclick = () => { S.fontSize = Math.min(200, S.fontSize+10); S.rend
 $('close-btn').onclick = () => { if (S.curIdx >= 0) closeReader(); };
 
 // ============================================================
-// 8. Bookmarks
-// ============================================================
-function saveBm() { localStorage.setItem('pr2_bookmarks', JSON.stringify(S.bookmarks)); }
-
-$('bookmark-btn').onclick = () => {
-  if (S.curIdx < 0) return;
-  renderBmList();
-  openModal('bookmark-modal');
-};
-
-$('bm-add').onclick = () => {
-  if (S.curIdx < 0) return;
-  const name = $('bm-name').value.trim() || ('书签 '+(S.bookmarks.length+1));
-  const book = S.books[S.curIdx];
-  let pos = {};
-  if (S.rendition) {
-    const loc = S.rendition.currentLocation();
-    if (loc?.start?.cfi) pos = { type:'cfi', cfi:loc.start.cfi };
-  } else if (S.pdfDoc) {
-    pos = { type:'page', page:S.pdfPage, total:S.pdfDoc.numPages };
-  } else {
-    const v = $('docx-viewer');
-    const t = v.scrollHeight - v.clientHeight;
-    pos = { type:'scroll', pct: t > 0 ? Math.round((v.scrollTop/t)*100) : 0 };
-  }
-  S.bookmarks.push({ bookName:book.name, bookIdx:S.curIdx, name, position:pos, date:new Date().toISOString().slice(0,16).replace('T',' ') });
-  saveBm();
-  $('bm-name').value = '';
-  renderBmList();
-  showToast('书签已添加');
-};
-
-function renderBmList() {
-  const list = $('bookmark-list');
-  const bookName = S.curIdx >= 0 ? S.books[S.curIdx].name : '';
-  const bms = S.bookmarks.filter(b => b.bookName === bookName);
-  if (!bms.length) { list.innerHTML = '<div style="text-align:center;padding:16px;font-size:13px;color:var(--text-muted);">暂无书签</div>'; return; }
-  list.innerHTML = '';
-  bms.forEach((bm, i) => {
-    const realIdx = S.bookmarks.indexOf(bm);
-    const div = document.createElement('div');
-    div.className = 'bm-item';
-    let posStr = '';
-    if (bm.position.pct != null) posStr = bm.position.pct + '%';
-    else if (bm.position.page) posStr = 'p' + bm.position.page + '/' + bm.position.total;
-    else posStr = '—';
-    div.innerHTML = `<span class="bm-name">🔖 ${escHtml(bm.name)}</span><span class="bm-pos">${posStr} · ${bm.date||''}</span><button class="bm-del">✕</button>`;
-    div.querySelector('.bm-del').onclick = e => { e.stopPropagation(); S.bookmarks.splice(realIdx,1); saveBm(); renderBmList(); };
-    div.onclick = () => jumpBm(bm);
-    list.appendChild(div);
-  });
-}
-
-async function jumpBm(bm) {
-  closeModal('bookmark-modal');
-  if (S.curIdx !== bm.bookIdx) await openBook(bm.bookIdx);
-  const p = bm.position;
-  try {
-    if (p.type === 'cfi' && S.rendition) { await S.rendition.display(p.cfi); }
-    else if (p.type === 'page' && S.pdfDoc) { S.pdfPage = p.page; await renderPdfPage(p.page); }
-    else if (p.type === 'scroll') { const v = $('docx-viewer'); const t = v.scrollHeight - v.clientHeight; if (t > 0) v.scrollTop = (p.pct/100)*t; }
-  } catch(e) { console.error('Jump error:', e); }
-}
-
-// ============================================================
-// 9. Jump to position
-// ============================================================
-$('jump-btn').onclick = () => {
-  if (S.curIdx < 0) return;
-  $('jump-page').value = ''; $('jump-pct').value = '';
-  openModal('jump-modal');
-};
-
-$('jump-go').onclick = async () => {
-  const pv = $('jump-page').value, pcv = $('jump-pct').value;
-  if (S.rendition && pcv) {
-    const pct = Math.max(0, Math.min(100, parseInt(pcv))) / 100;
-    try {
-      const epubBook = S.rendition.book;
-      const locs = await epubBook.locations.generate(1000);
-      const idx = Math.floor(pct * locs.length);
-      if (locs[idx]) await S.rendition.display(locs[idx]);
-    } catch(e) { showToast('跳转失败'); }
-  } else if (S.pdfDoc) {
-    const page = pv ? parseInt(pv) : (pcv ? Math.ceil((parseInt(pcv)/100)*S.pdfDoc.numPages) : null);
-    if (page && page >= 1 && page <= S.pdfDoc.numPages) { S.pdfPage = page; await renderPdfPage(page); }
-  } else if (pcv) {
-    const v = $('docx-viewer');
-    const t = v.scrollHeight - v.clientHeight;
-    if (t > 0) v.scrollTop = (parseInt(pcv)/100)*t;
-  }
-  closeModal('jump-modal');
-};
-
-// ============================================================
-// 10. Brightness
-// ============================================================
-$('brightness-overlay').style.opacity = S.brightness / 100;
-$('brightness-btn').onclick = () => {
-  S.brightness = (S.brightness + 15) % 60;
-  localStorage.setItem('pr2_brightness', S.brightness);
-  $('brightness-overlay').style.opacity = S.brightness / 100;
-  showToast('亮度: ' + Math.round(S.brightness/0.6) + '%');
-};
-
-// ============================================================
-// 11. Init
+// 8. Init
 // ============================================================
 (async function init() {
   try {
     const all = await idbAll();
-    S.books = all.map(b => ({ id:b.id, name:b.name, format:b.format, progress:b.progress||0, lastRead:b.lastRead||0, cfi:b.cfi||null }));
+    S.books = all.map(b => ({ id:b.id, name:b.name, format:b.format, lastRead:b.lastRead||0, cfi:b.cfi||null, pdfPage:b.pdfPage||0, progress:b.progress||0 }));
   } catch(e) { console.error(e); }
   renderBookList();
 })();
