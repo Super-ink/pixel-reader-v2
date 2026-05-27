@@ -522,27 +522,31 @@ async function openEpub(book) {
   });
   S.rendition.themes.fontSize(S.fontSize + '%');
 
-  // Progress: combine spine index (from CFI) + within-section page position
+  // Global page numbering: use first section's page count as reference
   const totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
+  let refSectionPages = 0;  // page count of first rendered section
   let skipCount = 0;
   S.rendition.on('relocated', loc => {
-    if (skipCount < 1) { skipCount++; return; }
+    if (skipCount < 1) {
+      if (loc.start.displayed.total > 0) refSectionPages = loc.start.displayed.total;
+      skipCount++; return;
+    }
     const cfi = loc.start.cfi;
     if (!cfi) return;
     const page = loc.start.displayed.page;
     const total = loc.start.displayed.total;
-    // Parse section index from CFI: epubcfi(/6/SECTION[...]!/...)
+    if (!refSectionPages && total > 0) refSectionPages = total;
     const m = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
     const secIdx = m ? parseInt(m[1]) : 0;
-    const secFrac = total > 0 ? (page / total) : 0;
-    const pct = Math.min(100, Math.round(((secIdx + secFrac) / totalSections) * 100));
+    // Scale section page to reference-page units for consistent global numbering
+    const scaledPage = total > 0 && refSectionPages > 0 ? Math.round(page * refSectionPages / total) : page;
+    const globalPage = secIdx * (refSectionPages || total) + scaledPage;
+    const estTotal = (refSectionPages || total) * totalSections;
+    const pct = estTotal > 0 ? Math.min(100, Math.round((globalPage / estTotal) * 100)) : 0;
     S.books[S.curIdx].progress = pct; S.books[S.curIdx].cfi = cfi;
     const idx = S.curIdx;
     idbGet(S.books[idx].id).then(f => { if (f) { f.progress = pct; f.cfi = cfi; idbPut(f); } });
-    updatePageInfo(
-      S.dualPage && loc.end ? `${loc.start.displayed.page}-${loc.end.displayed.page}` : page,
-      total
-    );
+    updatePageInfo(globalPage, estTotal);
   });
 
   let restored = false;
@@ -728,20 +732,26 @@ $('spread-btn').onclick = async () => {
     p: { 'margin':'0 0 1em 0' },
   });
   S.rendition.themes.fontSize(S.fontSize+'%');
-  let skipCount = 0;
+  let refSectionPages = 0, skipCount = 0;
   S.rendition.on('relocated', loc => {
-    if (skipCount < 1) { skipCount++; return; }
+    if (skipCount < 1) {
+      if (loc.start.displayed.total > 0) refSectionPages = loc.start.displayed.total;
+      skipCount++; return;
+    }
     const cfi = loc.start.cfi;
     if (!cfi) return;
     const page = loc.start.displayed.page;
     const total = loc.start.displayed.total;
+    if (!refSectionPages && total > 0) refSectionPages = total;
     const m = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
     const secIdx = m ? parseInt(m[1]) : 0;
-    const secFrac = total > 0 ? (page / total) : 0;
-    const pct = Math.min(100, Math.round(((secIdx + secFrac) / totalSections) * 100));
+    const scaledPage = total > 0 && refSectionPages > 0 ? Math.round(page * refSectionPages / total) : page;
+    const globalPage = secIdx * (refSectionPages || total) + scaledPage;
+    const estTotal = (refSectionPages || total) * totalSections;
+    const pct = estTotal > 0 ? Math.min(100, Math.round((globalPage / estTotal) * 100)) : 0;
     S.books[S.curIdx].progress = pct; S.books[S.curIdx].cfi = cfi;
     idbGet(S.books[S.curIdx].id).then(f => { if (f) { f.progress = pct; f.cfi = cfi; idbPut(f); } });
-    updatePageInfo(S.dualPage&&loc.end?`${loc.start.displayed.page}-${loc.end.displayed.page}`:page, total);
+    updatePageInfo(globalPage, estTotal);
   });
   if (cfi) { try { await S.rendition.display(cfi); } catch {} } else { await S.rendition.display(); }
 };
