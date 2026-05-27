@@ -263,7 +263,6 @@ body {
       <button class="tb-btn" id="next-btn" title="下一页" disabled>▶</button>
       <button class="tb-btn" id="font-sm" title="缩小字号">A-</button>
       <button class="tb-btn" id="font-lg" title="放大字号">A+</button>
-      <button class="tb-btn" id="spread-btn" title="双页模式">⊡</button>
       <button class="tb-btn" id="bookmark-btn" title="书签">🔖</button>
       <button class="tb-btn" id="jump-btn" title="跳转">↗</button>
       <button class="tb-btn" id="brightness-btn" title="亮度调节">☀</button>
@@ -368,7 +367,7 @@ const S = {
   rendition: null,
   pdfDoc: null,
   pdfPage: 1,
-  dualPage: false,
+
   fontSize: 100,
   bookmarks: JSON.parse(localStorage.getItem('pr2_bookmarks') || '[]'),
   brightness: parseInt(localStorage.getItem('pr2_brightness') || '0'),
@@ -513,8 +512,7 @@ async function openEpub(book) {
 
   S.rendition = epubBook.renderTo(viewer, {
     width:'100%', height:'100%',
-    spread: S.dualPage ? 'both' : 'none',
-    minSpreadWidth: 600,
+    spread: 'none',
   });
   S.rendition.themes.default({
     body: { 'font-family':'Georgia, "Noto Serif SC", serif', 'line-height':'1.8', 'padding':'20px', 'color':'#4a3f35', 'background':'#fffdf7' },
@@ -570,7 +568,7 @@ async function openEpub(book) {
   }
 
   updateNavState(false, false);
-  $('spread-btn').classList.toggle('active', S.dualPage);
+
 }
 
 // --- PDF ---
@@ -654,7 +652,6 @@ function closeReader() {
   $('current-book-name').textContent = '未选择书籍';
   $('page-info').style.display = 'none';
   updateNavState(true, true);
-  $('spread-btn').classList.remove('active');
   renderBookList();
 }
 
@@ -721,50 +718,6 @@ $('reader-content').addEventListener('wheel', e => {
 // Toolbar buttons
 $('font-sm').onclick = () => { S.fontSize = Math.max(60, S.fontSize-10); S.rendition?.themes.fontSize(S.fontSize+'%'); };
 $('font-lg').onclick = () => { S.fontSize = Math.min(200, S.fontSize+10); S.rendition?.themes.fontSize(S.fontSize+'%'); };
-
-$('spread-btn').onclick = async () => {
-  if (!S.rendition) { showToast('双页仅支持 EPUB'); return; }
-  S.dualPage = !S.dualPage;
-  $('spread-btn').classList.toggle('active', S.dualPage);
-  const loc = S.rendition.currentLocation();
-  const cfi = loc?.start?.cfi;
-  const epubBook = S.rendition.book;
-  const totalChars = epubBook.locations.total || 0;
-  S.rendition.destroy();
-  $('epub-viewer').innerHTML = '';
-  S.rendition = epubBook.renderTo($('epub-viewer'), { width:'100%', height:'100%', spread:S.dualPage?'both':'none', minSpreadWidth:600 });
-  S.rendition.themes.default({
-    body: { 'font-family':'Georgia, "Noto Serif SC", serif', 'line-height':'1.8', 'padding':'20px', 'color':'#4a3f35', 'background':'#fffdf7' },
-    p: { 'margin':'0 0 1em 0' },
-  });
-  S.rendition.themes.fontSize(S.fontSize+'%');
-  let charsPerPage = 0, prevOffset = 0, skipCount = 0;
-  S.rendition.on('relocated', loc => {
-    if (skipCount < 1) {
-      const cfi = loc.start.cfi;
-      if (cfi && epubBook.locations.length > 0) prevOffset = epubBook.locations.lengthFromCfi(cfi) || 0;
-      skipCount++; return;
-    }
-    const cfi = loc.start.cfi;
-    if (!cfi) return;
-    const offset = epubBook.locations.length > 0 ? (epubBook.locations.lengthFromCfi(cfi) || 0) : -1;
-    if (!charsPerPage && offset > prevOffset) charsPerPage = offset - prevOffset;
-    prevOffset = offset;
-    let globalPage, estTotal;
-    if (charsPerPage > 0 && totalChars > 0) {
-      estTotal = Math.round(totalChars / charsPerPage);
-      globalPage = Math.max(1, Math.round(offset / charsPerPage));
-    } else {
-      globalPage = loc.start.displayed.page;
-      estTotal = loc.start.displayed.total;
-    }
-    const pct = estTotal > 0 ? Math.min(100, Math.round((globalPage / estTotal) * 100)) : 0;
-    S.books[S.curIdx].progress = pct; S.books[S.curIdx].cfi = cfi;
-    idbGet(S.books[S.curIdx].id).then(f => { if (f) { f.progress = pct; f.cfi = cfi; idbPut(f); } });
-    updatePageInfo(globalPage, estTotal);
-  });
-  if (cfi) { try { await S.rendition.display(cfi); } catch {} } else { await S.rendition.display(); }
-};
 
 $('close-btn').onclick = () => { if (S.curIdx >= 0) closeReader(); };
 
