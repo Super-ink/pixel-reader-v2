@@ -523,8 +523,9 @@ async function openEpub(book) {
   S.rendition.themes.fontSize(S.fontSize + '%');
 
   // Global page numbering: use first section's page count as reference
-  const totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
-  let refSectionPages = 0;  // page count of first rendered section
+  // totalSections is fetched lazily — spine isn't ready until relocated fires
+  let totalSections = 0;
+  let refSectionPages = 0;
   let skipCount = 0;
   S.rendition.on('relocated', loc => {
     if (skipCount < 1) {
@@ -536,9 +537,11 @@ async function openEpub(book) {
     const page = loc.start.displayed.page;
     const total = loc.start.displayed.total;
     if (!refSectionPages && total > 0) refSectionPages = total;
+    if (!totalSections) {
+      totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
+    }
     const m = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
     const secIdx = m ? parseInt(m[1]) : 0;
-    // Scale section page to reference-page units for consistent global numbering
     const scaledPage = total > 0 && refSectionPages > 0 ? Math.round(page * refSectionPages / total) : page;
     const globalPage = secIdx * (refSectionPages || total) + scaledPage;
     const estTotal = (refSectionPages || total) * totalSections;
@@ -723,7 +726,6 @@ $('spread-btn').onclick = async () => {
   const loc = S.rendition.currentLocation();
   const cfi = loc?.start?.cfi;
   const epubBook = S.rendition.book;
-  const totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
   S.rendition.destroy();
   $('epub-viewer').innerHTML = '';
   S.rendition = epubBook.renderTo($('epub-viewer'), { width:'100%', height:'100%', spread:S.dualPage?'both':'none', minSpreadWidth:600 });
@@ -732,7 +734,7 @@ $('spread-btn').onclick = async () => {
     p: { 'margin':'0 0 1em 0' },
   });
   S.rendition.themes.fontSize(S.fontSize+'%');
-  let refSectionPages = 0, skipCount = 0;
+  let totalSections = 0, refSectionPages = 0, skipCount = 0;
   S.rendition.on('relocated', loc => {
     if (skipCount < 1) {
       if (loc.start.displayed.total > 0) refSectionPages = loc.start.displayed.total;
@@ -743,6 +745,9 @@ $('spread-btn').onclick = async () => {
     const page = loc.start.displayed.page;
     const total = loc.start.displayed.total;
     if (!refSectionPages && total > 0) refSectionPages = total;
+    if (!totalSections) {
+      totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
+    }
     const m = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
     const secIdx = m ? parseInt(m[1]) : 0;
     const scaledPage = total > 0 && refSectionPages > 0 ? Math.round(page * refSectionPages / total) : page;
