@@ -522,29 +522,32 @@ async function openEpub(book) {
   });
   S.rendition.themes.fontSize(S.fontSize + '%');
 
-  // Global page numbering: use first section's page count as reference
-  // totalSections is fetched lazily — spine isn't ready until relocated fires
-  let totalSections = 0;
-  let refSectionPages = 0;
-  let skipCount = 0;
+  try { await epubBook.locations.generate(2000); } catch(e) { console.warn('Locations:', e); }
+  const totalChars = epubBook.locations.total || 0;
+  let charsPerPage = 0, prevOffset = 0, skipCount = 0;
+
   S.rendition.on('relocated', loc => {
     if (skipCount < 1) {
-      if (loc.start.displayed.total > 0) refSectionPages = loc.start.displayed.total;
+      const cfi = loc.start.cfi;
+      if (cfi && epubBook.locations.length > 0) prevOffset = epubBook.locations.lengthFromCfi(cfi) || 0;
       skipCount++; return;
     }
     const cfi = loc.start.cfi;
     if (!cfi) return;
-    const page = loc.start.displayed.page;
-    const total = loc.start.displayed.total;
-    if (!refSectionPages && total > 0) refSectionPages = total;
-    if (!totalSections) {
-      totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
+    const offset = epubBook.locations.length > 0 ? (epubBook.locations.lengthFromCfi(cfi) || 0) : -1;
+    // Calibrate: characters between two consecutive pages
+    if (!charsPerPage && offset > prevOffset) charsPerPage = offset - prevOffset;
+    prevOffset = offset;
+
+    let globalPage, estTotal;
+    if (charsPerPage > 0 && totalChars > 0) {
+      estTotal = Math.round(totalChars / charsPerPage);
+      globalPage = Math.max(1, Math.round(offset / charsPerPage));
+    } else {
+      // Still calibrating — use displayed values
+      globalPage = loc.start.displayed.page;
+      estTotal = loc.start.displayed.total;
     }
-    const m = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
-    const secIdx = m ? parseInt(m[1]) : 0;
-    const scaledPage = total > 0 && refSectionPages > 0 ? Math.round(page * refSectionPages / total) : page;
-    const globalPage = secIdx * (refSectionPages || total) + scaledPage;
-    const estTotal = (refSectionPages || total) * totalSections;
     const pct = estTotal > 0 ? Math.min(100, Math.round((globalPage / estTotal) * 100)) : 0;
     S.books[S.curIdx].progress = pct; S.books[S.curIdx].cfi = cfi;
     const idx = S.curIdx;
@@ -726,6 +729,7 @@ $('spread-btn').onclick = async () => {
   const loc = S.rendition.currentLocation();
   const cfi = loc?.start?.cfi;
   const epubBook = S.rendition.book;
+  const totalChars = epubBook.locations.total || 0;
   S.rendition.destroy();
   $('epub-viewer').innerHTML = '';
   S.rendition = epubBook.renderTo($('epub-viewer'), { width:'100%', height:'100%', spread:S.dualPage?'both':'none', minSpreadWidth:600 });
@@ -734,25 +738,26 @@ $('spread-btn').onclick = async () => {
     p: { 'margin':'0 0 1em 0' },
   });
   S.rendition.themes.fontSize(S.fontSize+'%');
-  let totalSections = 0, refSectionPages = 0, skipCount = 0;
+  let charsPerPage = 0, prevOffset = 0, skipCount = 0;
   S.rendition.on('relocated', loc => {
     if (skipCount < 1) {
-      if (loc.start.displayed.total > 0) refSectionPages = loc.start.displayed.total;
+      const cfi = loc.start.cfi;
+      if (cfi && epubBook.locations.length > 0) prevOffset = epubBook.locations.lengthFromCfi(cfi) || 0;
       skipCount++; return;
     }
     const cfi = loc.start.cfi;
     if (!cfi) return;
-    const page = loc.start.displayed.page;
-    const total = loc.start.displayed.total;
-    if (!refSectionPages && total > 0) refSectionPages = total;
-    if (!totalSections) {
-      totalSections = (epubBook.spine && epubBook.spine.items) ? epubBook.spine.items.length : 1;
+    const offset = epubBook.locations.length > 0 ? (epubBook.locations.lengthFromCfi(cfi) || 0) : -1;
+    if (!charsPerPage && offset > prevOffset) charsPerPage = offset - prevOffset;
+    prevOffset = offset;
+    let globalPage, estTotal;
+    if (charsPerPage > 0 && totalChars > 0) {
+      estTotal = Math.round(totalChars / charsPerPage);
+      globalPage = Math.max(1, Math.round(offset / charsPerPage));
+    } else {
+      globalPage = loc.start.displayed.page;
+      estTotal = loc.start.displayed.total;
     }
-    const m = cfi.match(/epubcfi\(\/\d+\/(\d+)/);
-    const secIdx = m ? parseInt(m[1]) : 0;
-    const scaledPage = total > 0 && refSectionPages > 0 ? Math.round(page * refSectionPages / total) : page;
-    const globalPage = secIdx * (refSectionPages || total) + scaledPage;
-    const estTotal = (refSectionPages || total) * totalSections;
     const pct = estTotal > 0 ? Math.min(100, Math.round((globalPage / estTotal) * 100)) : 0;
     S.books[S.curIdx].progress = pct; S.books[S.curIdx].cfi = cfi;
     idbGet(S.books[S.curIdx].id).then(f => { if (f) { f.progress = pct; f.cfi = cfi; idbPut(f); } });
