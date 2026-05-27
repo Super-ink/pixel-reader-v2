@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pixel Reader</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/epubjs@0.3.93/dist/epub.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
+<style>
+:root {
+  --bg: #f5f0e8; --panel: #ffffffee; --cream: #fff8f0;
+  --green: #6aaa64; --green-dark: #3d7a38; --green-light: #a8d8a0;
+  --text: #4a3f35; --text-light: #7a6f60; --text-muted: #a89f90;
+  --accent: #d96b6b; --gold: #c9a84c; --shadow: rgba(80,60,30,0.1);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, "Noto Sans SC", "PingFang SC", sans-serif;
+  background: var(--bg); color: var(--text);
+  overflow: hidden; height: 100vh; width: 100vw;
+}
+
+/* === SIDEBAR === */
+.menu-overlay { position:fixed; inset:0; background:rgba(60,50,30,0.3); z-index:200; opacity:0; pointer-events:none; transition:opacity 0.25s; }
+.menu-overlay.open { opacity:1; pointer-events:all; }
+.sidebar {
+  position:fixed; top:0; left:0; bottom:0; width:320px; z-index:201;
+  background: var(--panel); border-right:2px solid var(--green);
+  transform:translateX(-100%); transition:transform 0.25s ease;
+  display:flex; flex-direction:column; box-shadow:4px 0 20px var(--shadow);
+}
+.sidebar.open { transform:translateX(0); }
+.sidebar-header {
+  padding:20px 16px 12px; text-align:center;
+  background:linear-gradient(180deg, #f0f8e8, var(--cream));
+  border-bottom:1px dashed var(--green-light); flex-shrink:0;
+}
+.sidebar-header h2 { font-size:18px; color:var(--green-dark); letter-spacing:2px; font-weight:700; }
+.sidebar-header .sub { font-size:13px; color:#8b6f47; margin-top:2px; }
+.search-wrap { padding:8px 10px; border-bottom:1px dashed var(--green-light); background:var(--cream); flex-shrink:0; }
+.search-wrap input {
+  width:100%; padding:8px 10px; border:2px solid var(--green-light); border-radius:6px;
+  font-size:13px; background:#fff; color:var(--text); outline:none;
+}
+.search-wrap input:focus { border-color:var(--green); }
+.search-wrap input::placeholder { color:var(--text-muted); }
+
+.book-list { flex:1; overflow-y:auto; padding:8px; background:#faf6ee; }
+.book-list::-webkit-scrollbar { width:6px; }
+.book-list::-webkit-scrollbar-thumb { background:var(--green-light); border-radius:3px; }
+.book-item {
+  display:flex; align-items:center; gap:10px; padding:10px;
+  margin-bottom:6px; background:var(--cream); border:2px solid transparent;
+  border-radius:6px; cursor:pointer; transition:all 0.15s; position:relative;
+}
+.book-item:hover { background:#fff; border-color:var(--green-light); box-shadow:0 2px 8px var(--shadow); }
+.book-item.active { background:#f0f8e8; border-color:var(--green); box-shadow:0 2px 12px rgba(106,170,100,0.2); }
+.book-icon {
+  width:32px; height:40px; flex-shrink:0; border-radius:3px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:#fff;
+}
+.book-meta { flex:1; min-width:0; }
+.book-title { font-size:14px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.book-info { font-size:11px; color:var(--text-muted); margin-top:2px; display:flex; gap:8px; }
+.book-progress { font-size:11px; color:var(--gold); font-weight:600; }
+.item-btn {
+  position:absolute; top:4px; width:20px; height:20px; background:none; border:none;
+  font-size:12px; cursor:pointer; opacity:0; transition:opacity 0.2s; border-radius:3px;
+  display:flex; align-items:center; justify-content:center;
+}
+.book-item:hover .item-btn { opacity:1; }
+.item-btn.edit { right:24px; color:var(--text-light); }
+.item-btn.edit:hover { color:var(--green-dark); background:#f0f8e8; }
+.item-btn.del { right:4px; color:var(--accent); }
+.item-btn.del:hover { background:#fff0f0; }
+
+.sidebar-footer { padding:12px; border-top:1px dashed var(--green-light); flex-shrink:0; background:linear-gradient(0deg, #f0f8e8, var(--cream)); }
+.btn-add {
+  width:100%; padding:10px; background:var(--green); color:#fff; border:none;
+  border-radius:6px; font-size:15px; font-weight:600; cursor:pointer;
+  transition:all 0.15s; letter-spacing:1px; box-shadow:0 2px 0 var(--green-dark);
+}
+.btn-add:hover { background:#7bc47b; }
+.btn-add:active { transform:translateY(1px); box-shadow:0 1px 0 var(--green-dark); }
+
+/* === MENU TOGGLE === */
+.menu-toggle {
+  position:fixed; top:50%; left:0; transform:translateY(-50%); z-index:150;
+  background:var(--panel); border:2px solid var(--green); border-left:none;
+  border-radius:0 8px 8px 0; padding:12px 6px; cursor:pointer;
+  color:var(--green-dark); font-size:13px; font-weight:700;
+  writing-mode:vertical-rl; letter-spacing:4px; transition:all 0.15s;
+  box-shadow:2px 2px 8px var(--shadow);
+}
+.menu-toggle:hover { background:#f0f8e8; padding-right:10px; }
+
+/* === READER === */
+.reader-container {
+  position:fixed; top:16px; left:20px; right:20px; bottom:16px;
+  background:#fffdf7; border:2px solid var(--green); border-radius:8px;
+  overflow:hidden; display:flex; flex-direction:column;
+  box-shadow:0 4px 20px var(--shadow);
+}
+.reader-toolbar {
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+  padding:8px 14px; background:linear-gradient(180deg, #f0f8e8, var(--cream));
+  border-bottom:1px dashed var(--green-light);
+}
+.toolbar-left { display:flex; align-items:center; gap:8px; min-width:0; }
+.book-name-label { font-size:14px; font-weight:600; color:#8b6f47; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:240px; }
+.toolbar-right { display:flex; gap:5px; flex-shrink:0; }
+.tb-btn {
+  background:var(--cream); border:1.5px solid var(--green-light); color:var(--text);
+  padding:5px 10px; border-radius:4px; font-size:13px; cursor:pointer;
+  transition:all 0.15s; font-weight:500; white-space:nowrap;
+}
+.tb-btn:hover { background:#f0f8e8; border-color:var(--green); color:var(--green-dark); }
+.tb-btn:disabled { opacity:0.3; cursor:not-allowed; }
+.tb-btn.active { background:var(--green); color:#fff; border-color:var(--green-dark); }
+
+.reader-content {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  overflow:hidden; position:relative; background:var(--cream);
+}
+
+#epub-viewer { width:100%; height:100%; }
+#epub-viewer iframe { width:100%; height:100%; border:none; }
+
+#pdf-viewer {
+  width:100%; height:100%; overflow-y:auto; display:flex;
+  flex-direction:column; align-items:center; gap:12px; padding:16px;
+}
+#pdf-viewer canvas { max-width:100%; box-shadow:0 4px 20px var(--shadow); border-radius:2px; }
+
+#docx-viewer {
+  width:100%; height:100%; overflow-y:auto; padding:32px 40px;
+  background:var(--cream); color:var(--text); font-family:Georgia, "Noto Serif SC", serif;
+  font-size:16px; line-height:1.9;
+}
+#docx-viewer h1 { font-size:24px; margin:0.8em 0 0.4em; font-weight:bold; }
+#docx-viewer h2 { font-size:20px; margin:0.7em 0 0.3em; font-weight:bold; }
+#docx-viewer h3 { font-size:18px; margin:0.6em 0 0.3em; font-weight:bold; }
+#docx-viewer p { margin:0 0 1em; }
+#docx-viewer table { border-collapse:collapse; margin:1em 0; width:100%; }
+#docx-viewer td, #docx-viewer th { border:1px solid var(--green-light); padding:6px 10px; }
+#docx-viewer th { background:#f0f8e8; }
+#docx-viewer img { max-width:100%; }
+#docx-viewer ul, #docx-viewer ol { margin:0 0 1em 1.5em; }
+#docx-viewer blockquote { border-left:3px solid var(--green); padding-left:12px; margin:1em 0; color:var(--text-light); }
+
+.welcome { text-align:center; padding:40px; }
+.welcome .icon { font-size:48px; margin-bottom:16px; }
+.welcome h2 { font-size:18px; color:var(--green-dark); margin-bottom:10px; }
+.welcome p { font-size:14px; color:var(--text-light); line-height:2.2; }
+
+.page-info {
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:50;
+  font-size:12px; color:var(--text-light); background:var(--panel);
+  padding:5px 16px; border:1.5px solid var(--green-light); border-radius:12px;
+  box-shadow:0 2px 8px var(--shadow); font-weight:500;
+}
+
+/* === MODALS === */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(60,50,30,0.45); z-index:500;
+  display:none; align-items:center; justify-content:center;
+}
+.modal-overlay.show { display:flex; }
+.modal-box {
+  background:var(--panel); border:2px solid var(--green); border-radius:10px;
+  padding:20px; min-width:320px; max-width:440px; max-height:80vh; overflow-y:auto;
+  box-shadow:0 8px 32px var(--shadow);
+}
+.modal-box h3 { font-size:16px; color:var(--green-dark); margin-bottom:14px; text-align:center; font-weight:700; }
+.modal-box label { display:block; font-size:13px; color:var(--text-light); margin-bottom:4px; margin-top:10px; }
+.modal-box input[type="text"], .modal-box input[type="number"] {
+  width:100%; padding:8px; border:2px solid var(--green-light); border-radius:6px;
+  font-size:14px; background:#fff; color:var(--text); outline:none;
+}
+.modal-box input:focus { border-color:var(--green); }
+.modal-btn-row { display:flex; gap:8px; margin-top:16px; justify-content:center; }
+.modal-btn {
+  padding:8px 20px; border:2px solid var(--green-light); border-radius:6px;
+  font-size:13px; cursor:pointer; transition:all 0.15s; font-weight:600;
+}
+.modal-btn.primary { background:var(--green); color:#fff; border-color:var(--green-dark); }
+.modal-btn.primary:hover { background:#7bc47b; }
+.modal-btn.cancel { background:var(--cream); color:var(--text-light); }
+.modal-btn.cancel:hover { background:#f0f8e8; }
+
+.bm-item {
+  display:flex; align-items:center; gap:8px; padding:8px; margin-bottom:4px;
+  background:var(--cream); border:2px solid transparent; border-radius:6px;
+  cursor:pointer; transition:all 0.15s;
+}
+.bm-item:hover { border-color:var(--green-light); background:#f0f8e8; }
+.bm-item .bm-name { flex:1; font-size:13px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bm-item .bm-pos { font-size:11px; color:var(--text-muted); flex-shrink:0; }
+.bm-item .bm-del { background:none; border:none; color:var(--accent); font-size:14px; cursor:pointer; opacity:0; transition:opacity 0.2s; }
+.bm-item:hover .bm-del { opacity:1; }
+
+/* === LOADING === */
+.loading-overlay {
+  position:fixed; inset:0; background:rgba(245,240,232,0.85); z-index:400;
+  display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px;
+}
+.loading-overlay.show { display:flex; }
+.spinner { width:28px; height:28px; border:3px solid var(--green-light); border-top-color:var(--green); border-radius:50%; animation:spin 0.7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.loading-text { font-size:14px; color:var(--green-dark); font-weight:600; }
+
+/* === BRIGHTNESS === */
+.brightness-overlay { position:fixed; inset:0; background:#000; pointer-events:none; z-index:49; opacity:0; transition:opacity 0.2s; }
+#file-input { display:none; }
+
+/* === TOAST === */
+.toast {
+  position:fixed; bottom:60px; left:50%; transform:translateX(-50%) translateY(20px); z-index:350;
+  background:var(--panel); border:2px solid var(--green); padding:10px 24px;
+  font-size:13px; color:var(--text); opacity:0; transition:all 0.3s;
+  pointer-events:none; text-align:center; border-radius:8px; box-shadow:0 4px 16px var(--shadow);
+  font-weight:500;
+}
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+@media (max-width:800px) {
+  .sidebar { width:280px; }
+  .reader-container { left:12px; right:12px; top:8px; bottom:8px; }
+  #docx-viewer { padding:20px 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="menu-overlay" id="menu-overlay"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <h2>📚 Pixel Reader</h2>
+    <div class="sub">我的书架</div>
+  </div>
+  <div class="search-wrap">
+    <input type="text" id="book-search" placeholder="搜索书籍...">
+  </div>
+  <div class="book-list" id="book-list"></div>
+  <div class="sidebar-footer">
+    <button class="btn-add" id="add-book-btn">+ 添加书籍</button>
+  </div>
+</aside>
+<button class="menu-toggle" id="menu-toggle">书 架</button>
+
+<!-- Reader -->
+<div class="reader-container" id="reader-container">
+  <div class="reader-toolbar">
+    <div class="toolbar-left">
+      <span class="book-name-label" id="current-book-name">未选择书籍</span>
+    </div>
+    <div class="toolbar-right">
+      <button class="tb-btn" id="prev-btn" title="上一页" disabled>◀</button>
+      <button class="tb-btn" id="next-btn" title="下一页" disabled>▶</button>
+      <button class="tb-btn" id="font-sm" title="缩小字号">A-</button>
+      <button class="tb-btn" id="font-lg" title="放大字号">A+</button>
+      <button class="tb-btn" id="spread-btn" title="双页模式">⊡</button>
+      <button class="tb-btn" id="bookmark-btn" title="书签">🔖</button>
+      <button class="tb-btn" id="jump-btn" title="跳转">↗</button>
+      <button class="tb-btn" id="brightness-btn" title="亮度调节">☀</button>
+      <button class="tb-btn" id="close-btn" title="关闭">✕</button>
+    </div>
+  </div>
+  <div class="reader-content" id="reader-content">
+    <div class="welcome" id="welcome-screen">
+      <div class="icon">📖</div>
+      <h2>欢迎使用 Pixel Reader</h2>
+      <p>点击左侧「书架」按钮<br>选择或添加一本书开始阅读</p>
+    </div>
+    <div id="epub-viewer" style="display:none"></div>
+    <div id="pdf-viewer" style="display:none"></div>
+    <div id="docx-viewer" style="display:none"></div>
+  </div>
+</div>
+<div class="page-info" id="page-info" style="display:none"></div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">加载中...</div>
+</div>
+
+<!-- Brightness -->
+<div class="brightness-overlay" id="brightness-overlay"></div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="bookmark-modal">
+  <div class="modal-box">
+    <h3>🔖 书签</h3>
+    <div style="display:flex;gap:6px;margin-bottom:12px;">
+      <input type="text" id="bm-name" placeholder="书签名称（可选）" style="flex:1;">
+      <button class="modal-btn primary" id="bm-add" style="flex-shrink:0;">添加</button>
+    </div>
+    <div id="bookmark-list"></div>
+    <div class="modal-btn-row">
+      <button class="modal-btn cancel" onclick="closeModal('bookmark-modal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="jump-modal">
+  <div class="modal-box">
+    <h3>↗ 跳转到</h3>
+    <label>页码（PDF）</label>
+    <input type="number" id="jump-page" placeholder="输入页码" min="1">
+    <label>百分比（EPUB/DOCX）</label>
+    <input type="number" id="jump-pct" placeholder="1-100" min="0" max="100">
+    <div class="modal-btn-row">
+      <button class="modal-btn primary" id="jump-go">跳转</button>
+      <button class="modal-btn cancel" onclick="closeModal('jump-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal-box">
+    <h3>✏ 编辑书名</h3>
+    <input type="text" id="edit-name">
+    <div class="modal-btn-row">
+      <button class="modal-btn primary" id="edit-save">保存</button>
+      <button class="modal-btn cancel" onclick="closeModal('edit-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept=".epub,.pdf,.docx,.txt" multiple>
+
+<script>
+// ============================================================
+// 1. IndexedDB
+// ============================================================
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const DB_NAME = 'PixelReaderV2', DB_VER = 1, STORE = 'books';
+
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = e => { if (!e.target.result.objectStoreNames.contains(STORE)) e.target.result.createObjectStore(STORE, { keyPath:'id', autoIncrement:true }); };
+    r.onsuccess = e => res(e.target.result);
+    r.onerror = e => rej(e.target.error);
+  });
+}
+async function idbAdd(book) { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction(STORE,'readwrite'); const r = tx.objectStore(STORE).add(book); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbAll() { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction(STORE,'readonly'); const r = tx.objectStore(STORE).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbGet(id) { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction(STORE,'readonly'); const r = tx.objectStore(STORE).get(id); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbPut(book) { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction(STORE,'readwrite'); const r = tx.objectStore(STORE).put(book); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbDel(id) { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction(STORE,'readwrite'); const r = tx.objectStore(STORE).delete(id); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
+
+// ============================================================
+// 2. State
+// ============================================================
+const S = {
+  books: [],
+  curIdx: -1,
+  rendition: null,
+  pdfDoc: null,
+  pdfPage: 1,
+  dualPage: false,
+  fontSize: 100,
+  bookmarks: JSON.parse(localStorage.getItem('pr2_bookmarks') || '[]'),
+  brightness: parseInt(localStorage.getItem('pr2_brightness') || '0'),
+};
+
+// ============================================================
+// 3. UI helpers
+// ============================================================
+const $ = id => document.getElementById(id);
+function showLoading(msg) { $('loading-text').textContent = msg; $('loading').classList.add('show'); }
+function hideLoading() { $('loading').classList.remove('show'); }
+function openModal(id) { $(id).classList.add('show'); }
+function closeModal(id) { $(id).classList.remove('show'); }
+function showToast(msg, type) {
+  const t = $('toast'); t.textContent = msg; t.className = 'toast ' + (type||'');
+  t.classList.add('show'); clearTimeout(t._tid); t._tid = setTimeout(() => t.classList.remove('show'), 2200);
+}
+document.querySelectorAll('.modal-overlay').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); }));
+
+// ============================================================
+// 4. Book list
+// ============================================================
+const FMT_COLORS = { epub:'#d96b6b', pdf:'#c94c4c', docx:'#4a90d9', txt:'#7a9e7a' };
+const FMT_LABELS = { epub:'EPUB', pdf:'PDF', docx:'DOCX', txt:'TXT' };
+
+function renderBookList(filter) {
+  const list = $('book-list');
+  const q = (filter || $('book-search').value || '').toLowerCase();
+  const sorted = S.books.map((b,i) => ({...b, _i:i})).sort((a,b) => (b.lastRead||0)-(a.lastRead||0));
+  const items = q ? sorted.filter(b => b.name.toLowerCase().includes(q)) : sorted;
+
+  if (!items.length) {
+    list.innerHTML = S.books.length === 0
+      ? '<div style="text-align:center;padding:30px 10px;font-size:13px;color:var(--text-light);line-height:2.5;">书架空空~<br>点击下方按钮<br>添加你的第一本书 📚</div>'
+      : '<div style="text-align:center;padding:20px;font-size:13px;color:var(--text-muted);">没有匹配的书籍</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  items.forEach(b => {
+    const div = document.createElement('div');
+    div.className = 'book-item' + (b._i === S.curIdx ? ' active' : '');
+    div.innerHTML = `
+      <div class="book-icon" style="background:${FMT_COLORS[b.format]||'#888'}">${FMT_LABELS[b.format]||b.format}</div>
+      <div class="book-meta">
+        <div class="book-title">${escHtml(b.name)}</div>
+        <div class="book-info">
+          <span>${FMT_LABELS[b.format]||b.format}</span>
+          <span class="book-progress">${b.progress > 0 ? Math.round(b.progress)+'%' : '未读'}</span>
+        </div>
+      </div>
+      <button class="item-btn edit" title="编辑">✏</button>
+      <button class="item-btn del" title="删除">✕</button>
+    `;
+    div.onclick = () => openBook(b._i);
+    div.querySelector('.item-btn.edit').onclick = e => { e.stopPropagation(); openEditModal(b._i); };
+    div.querySelector('.item-btn.del').onclick = e => { e.stopPropagation(); removeBook(b._i); };
+    list.appendChild(div);
+  });
+}
+
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+$('book-search').addEventListener('input', () => renderBookList());
+
+async function removeBook(idx) {
+  const b = S.books[idx];
+  if (S.curIdx === idx) closeReader();
+  try { if (b.id != null) await idbDel(b.id); } catch(e) { console.error(e); }
+  S.books.splice(idx, 1);
+  if (S.curIdx > idx) S.curIdx--;
+  renderBookList();
+  showToast('已删除');
+}
+
+function openEditModal(idx) {
+  $('edit-name').value = S.books[idx].name;
+  $('edit-modal')._editIdx = idx;
+  openModal('edit-modal');
+}
+
+$('edit-save').onclick = async () => {
+  const idx = $('edit-modal')._editIdx;
+  const name = $('edit-name').value.trim();
+  if (!name || idx == null) return;
+  S.books[idx].name = name;
+  const full = await idbGet(S.books[idx].id);
+  if (full) { full.name = name; await idbPut(full); }
+  renderBookList();
+  if (S.curIdx === idx) $('current-book-name').textContent = name;
+  closeModal('edit-modal');
+};
+
+// Sidebar
+$('menu-toggle').onclick = () => { $('sidebar').classList.add('open'); $('menu-overlay').classList.add('open'); };
+function closeSidebar() { $('sidebar').classList.remove('open'); $('menu-overlay').classList.remove('open'); }
+$('menu-overlay').onclick = closeSidebar;
+
+// ============================================================
+// 5. File import
+// ============================================================
+$('add-book-btn').onclick = () => $('file-input').click();
+
+$('file-input').onchange = async e => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  showLoading('导入中...');
+  let added = 0;
+  for (const f of files) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (!['epub','pdf','docx','txt'].includes(ext)) { showToast('不支持: '+f.name); continue; }
+    const name = f.name.replace(/\.[^.]+$/,'');
+    if (S.books.some(b => b.name === name && b.format === ext)) { showToast('已存在: '+name); continue; }
+    try {
+      let data = await f.arrayBuffer(), fmt = ext;
+      if (ext === 'txt') {
+        const text = new TextDecoder('utf-8').decode(data);
+        const html = '<div style="padding:20px"><p>'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br>')+'</p></div>';
+        data = new TextEncoder().encode(html).buffer;
+        fmt = 'docx';
+      }
+      const id = await idbAdd({ name, format:fmt, data, progress:0, lastRead:0 });
+      S.books.push({ id, name, format:fmt, progress:0, lastRead:0 });
+      added++;
+    } catch(err) { console.error(err); showToast('添加失败: '+f.name); }
+  }
+  hideLoading();
+  renderBookList();
+  if (added) { showToast('已添加 '+added+' 本书'); closeSidebar(); }
+  e.target.value = '';
+};
+
+// ============================================================
+// 6. Format readers
+// ============================================================
+
+// --- EPUB ---
+async function openEpub(book) {
+  const viewer = $('epub-viewer');
+  viewer.style.display = 'block'; viewer.innerHTML = '';
+  const epubBook = ePub(book.data);
+
+  S.rendition = epubBook.renderTo(viewer, {
+    width:'100%', height:'100%',
+    spread: S.dualPage ? 'both' : 'none',
+    minSpreadWidth: 600,
+  });
+  S.rendition.themes.default({
+    body: { 'font-family':'Georgia, "Noto Serif SC", serif', 'line-height':'1.8', 'padding':'20px', 'color':'#4a3f35', 'background':'#fffdf7' },
+    p: { 'margin':'0 0 1em 0' },
+  });
+  S.rendition.themes.fontSize(S.fontSize + '%');
+
+  try { await epubBook.locations.generate(1000); } catch {}
+
+  let restored = false;
+  if (book.cfi) {
+    try { await S.rendition.display(book.cfi); restored = true; }
+    catch(e) { console.warn('CFI restore failed:', e); }
+  }
+  if (!restored) {
+    await S.rendition.display();
+    S.books[S.curIdx].progress = 0;
+    const full = await idbGet(S.books[S.curIdx].id);
+    if (full) { full.progress = 0; full.cfi = null; await idbPut(full); }
+  }
+
+  updateNavState(false, false);
+  let skipNext = restored;
+  S.rendition.on('relocated', loc => {
+    if (skipNext) { skipNext = false; return; }
+    const cfi = loc.start.cfi;
+    let pct = null;
+    if (epubBook.locations.length > 0) {
+      const pos = epubBook.locations.lengthFromCfi(cfi);
+      if (pos >= 0 && epubBook.locations.total > 0) pct = Math.min((pos / epubBook.locations.total)*100, 99.5);
+    }
+    if (cfi) {
+      S.books[S.curIdx].progress = pct||0; S.books[S.curIdx].cfi = cfi;
+      const idx = S.curIdx;
+      idbGet(S.books[idx].id).then(f => { if (f) { f.progress = pct||0; f.cfi = cfi; idbPut(f); } });
+    }
+    updatePageInfo(
+      S.dualPage && loc.end ? `${loc.start.displayed.page}-${loc.end.displayed.page}` : loc.start.displayed.page,
+      loc.start.displayed.total
+    );
+  });
+
+  $('spread-btn').classList.toggle('active', S.dualPage);
+}
+
+// --- PDF ---
+async function openPdf(book) {
+  const viewer = $('pdf-viewer');
+  viewer.style.display = 'block'; viewer.innerHTML = '';
+  S.pdfDoc = await pdfjsLib.getDocument({ data: book.data }).promise;
+  S.pdfPage = book.progress > 0 ? Math.ceil((book.progress/100)*S.pdfDoc.numPages) : 1;
+  await renderPdfPage(S.pdfPage);
+  updateNavState(false, false);
+}
+
+async function renderPdfPage(num) {
+  const viewer = $('pdf-viewer');
+  viewer.innerHTML = ''; viewer.scrollTop = 0;
+  const page = await S.pdfDoc.getPage(num);
+  const cw = $('reader-content').clientWidth - 32;
+  const vp = page.getViewport({ scale: 1 });
+  const scale = cw / vp.width;
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  canvas.style.maxWidth = '100%';
+  viewer.appendChild(canvas);
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+  const pct = (num / S.pdfDoc.numPages) * 100;
+  S.books[S.curIdx].progress = pct;
+  updatePageInfo(num, S.pdfDoc.numPages);
+  const b = S.books[S.curIdx];
+  if (b.id != null) { const f = await idbGet(b.id); if (f) { f.progress = pct; await idbPut(f); } }
+}
+
+// --- DOCX/TXT ---
+async function openDocx(book) {
+  const viewer = $('docx-viewer');
+  viewer.style.display = 'block'; viewer.innerHTML = ''; viewer.scrollTop = 0;
+
+  const result = await mammoth.convertToHtml({ arrayBuffer: book.data });
+  viewer.innerHTML = result.value;
+
+  const total = viewer.scrollHeight - viewer.clientHeight;
+  if (book.progress > 0 && total > 0) viewer.scrollTop = (book.progress/100) * total;
+
+  viewer.onscroll = () => {
+    const t = viewer.scrollHeight - viewer.clientHeight;
+    if (t <= 0) return;
+    const pct = Math.min(100, (viewer.scrollTop/t)*100);
+    S.books[S.curIdx].progress = pct;
+    updatePageInfo(Math.round(pct)+'%', '');
+    if (S.books[S.curIdx].id != null) {
+      idbGet(S.books[S.curIdx].id).then(f => { if (f) { f.progress = pct; idbPut(f); } });
+    }
+  };
+
+  updateNavState(true, true);
+  updatePageInfo(Math.round(book.progress||0)+'%', '');
+}
+
+// ============================================================
+// 7. Reader navigation
+// ============================================================
+function updateNavState(prevDisabled, nextDisabled) {
+  $('prev-btn').disabled = prevDisabled;
+  $('next-btn').disabled = nextDisabled;
+  if (!prevDisabled) $('prev-btn').onclick = () => navPrev();
+  if (!nextDisabled) $('next-btn').onclick = () => navNext();
+}
+
+function updatePageInfo(a, b) {
+  const el = $('page-info');
+  el.style.display = 'block';
+  el.textContent = b ? `${a} / ${b}` : `${a}`;
+}
+
+function closeReader() {
+  if (S.rendition) { try { S.rendition.destroy(); } catch(e) {} S.rendition = null; }
+  S.curIdx = -1; S.pdfDoc = null;
+  ['epub-viewer','pdf-viewer','docx-viewer'].forEach(id => { const e = $(id); e.style.display = 'none'; e.innerHTML = ''; if (id === 'docx-viewer') e.onscroll = null; });
+  $('welcome-screen').style.display = '';
+  $('current-book-name').textContent = '未选择书籍';
+  $('page-info').style.display = 'none';
+  updateNavState(true, true);
+  $('spread-btn').classList.remove('active');
+  renderBookList();
+}
+
+async function openBook(idx) {
+  closeSidebar();
+  const book = S.books[idx];
+  showLoading('打开 '+book.name+'...');
+  try {
+    const full = await idbGet(book.id);
+    if (!full || !full.data) throw new Error('无法读取书籍数据');
+    S.curIdx = idx;
+    $('welcome-screen').style.display = 'none';
+    ['epub-viewer','pdf-viewer','docx-viewer'].forEach(id => $(id).style.display = 'none');
+    $('docx-viewer').onscroll = null;
+    $('current-book-name').textContent = book.name;
+    $('page-info').style.display = 'block';
+
+    if (book.format === 'epub') await openEpub(full);
+    else if (book.format === 'pdf') await openPdf(full);
+    else await openDocx(full);
+
+    book.lastRead = Date.now();
+    const f2 = await idbGet(book.id);
+    if (f2) { f2.lastRead = book.lastRead; await idbPut(f2); }
+    renderBookList();
+  } catch(err) { console.error(err); showToast('打开失败: '+err.message); closeReader(); }
+  hideLoading();
+}
+
+// Navigation
+function navPrev() {
+  if (S.rendition) S.rendition.prev();
+  else if (S.pdfDoc && S.pdfPage > 1) { S.pdfPage--; renderPdfPage(S.pdfPage); }
+}
+function navNext() {
+  if (S.rendition) S.rendition.next();
+  else if (S.pdfDoc && S.pdfPage < S.pdfDoc.numPages) { S.pdfPage++; renderPdfPage(S.pdfPage); }
+}
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+  if (S.curIdx < 0) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); navPrev(); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); navNext(); }
+  if (e.key === 'Escape') closeReader();
+});
+
+// Wheel: EPUB page turn / PDF scroll
+$('reader-content').addEventListener('wheel', e => {
+  if (S.curIdx < 0) return;
+  if (S.rendition) {
+    e.preventDefault();
+    if (e.deltaY < 0) navPrev(); else navNext();
+  } else if (S.pdfDoc) {
+    const v = $('pdf-viewer');
+    const atTop = v.scrollTop <= 0;
+    const atBottom = v.scrollTop + v.clientHeight >= v.scrollHeight - 2;
+    if (e.deltaY < 0 && atTop) { e.preventDefault(); navPrev(); }
+    else if (e.deltaY > 0 && atBottom) { e.preventDefault(); navNext(); }
+  }
+}, { passive: false });
+
+// Toolbar buttons
+$('font-sm').onclick = () => { S.fontSize = Math.max(60, S.fontSize-10); S.rendition?.themes.fontSize(S.fontSize+'%'); };
+$('font-lg').onclick = () => { S.fontSize = Math.min(200, S.fontSize+10); S.rendition?.themes.fontSize(S.fontSize+'%'); };
+
+$('spread-btn').onclick = async () => {
+  if (!S.rendition) { showToast('双页仅支持 EPUB'); return; }
+  S.dualPage = !S.dualPage;
+  $('spread-btn').classList.toggle('active', S.dualPage);
+  const loc = S.rendition.currentLocation();
+  const cfi = loc?.start?.cfi;
+  const epubBook = S.rendition.book;
+  S.rendition.destroy();
+  $('epub-viewer').innerHTML = '';
+  S.rendition = epubBook.renderTo($('epub-viewer'), { width:'100%', height:'100%', spread:S.dualPage?'both':'none', minSpreadWidth:600 });
+  S.rendition.themes.default({
+    body: { 'font-family':'Georgia, "Noto Serif SC", serif', 'line-height':'1.8', 'padding':'20px', 'color':'#4a3f35', 'background':'#fffdf7' },
+    p: { 'margin':'0 0 1em 0' },
+  });
+  S.rendition.themes.fontSize(S.fontSize+'%');
+  if (cfi) { try { await S.rendition.display(cfi); } catch {} } else { await S.rendition.display(); }
+  S.rendition.on('relocated', loc => {
+    const cfi = loc.start.cfi;
+    let pct = null;
+    if (epubBook.locations.length > 0) {
+      const pos = epubBook.locations.lengthFromCfi(cfi);
+      if (pos >= 0 && epubBook.locations.total > 0) pct = Math.min((pos/epubBook.locations.total)*100, 99.5);
+    }
+    if (cfi) { S.books[S.curIdx].progress = pct||0; S.books[S.curIdx].cfi = cfi; }
+    updatePageInfo(S.dualPage&&loc.end?`${loc.start.displayed.page}-${loc.end.displayed.page}`:loc.start.displayed.page, loc.start.displayed.total);
+  });
+};
+
+$('close-btn').onclick = () => { if (S.curIdx >= 0) closeReader(); };
+
+// ============================================================
+// 8. Bookmarks
+// ============================================================
+function saveBm() { localStorage.setItem('pr2_bookmarks', JSON.stringify(S.bookmarks)); }
+
+$('bookmark-btn').onclick = () => {
+  if (S.curIdx < 0) return;
+  renderBmList();
+  openModal('bookmark-modal');
+};
+
+$('bm-add').onclick = () => {
+  if (S.curIdx < 0) return;
+  const name = $('bm-name').value.trim() || ('书签 '+(S.bookmarks.length+1));
+  const book = S.books[S.curIdx];
+  let pos = {};
+  if (S.rendition) {
+    const loc = S.rendition.currentLocation();
+    if (loc?.start?.cfi) pos = { type:'cfi', cfi:loc.start.cfi };
+  } else if (S.pdfDoc) {
+    pos = { type:'page', page:S.pdfPage, total:S.pdfDoc.numPages };
+  } else {
+    const v = $('docx-viewer');
+    const t = v.scrollHeight - v.clientHeight;
+    pos = { type:'scroll', pct: t > 0 ? Math.round((v.scrollTop/t)*100) : 0 };
+  }
+  S.bookmarks.push({ bookName:book.name, bookIdx:S.curIdx, name, position:pos, date:new Date().toISOString().slice(0,16).replace('T',' ') });
+  saveBm();
+  $('bm-name').value = '';
+  renderBmList();
+  showToast('书签已添加');
+};
+
+function renderBmList() {
+  const list = $('bookmark-list');
+  const bookName = S.curIdx >= 0 ? S.books[S.curIdx].name : '';
+  const bms = S.bookmarks.filter(b => b.bookName === bookName);
+  if (!bms.length) { list.innerHTML = '<div style="text-align:center;padding:16px;font-size:13px;color:var(--text-muted);">暂无书签</div>'; return; }
+  list.innerHTML = '';
+  bms.forEach((bm, i) => {
+    const realIdx = S.bookmarks.indexOf(bm);
+    const div = document.createElement('div');
+    div.className = 'bm-item';
+    let posStr = '';
+    if (bm.position.pct != null) posStr = bm.position.pct + '%';
+    else if (bm.position.page) posStr = 'p' + bm.position.page + '/' + bm.position.total;
+    else posStr = '—';
+    div.innerHTML = `<span class="bm-name">🔖 ${escHtml(bm.name)}</span><span class="bm-pos">${posStr} · ${bm.date||''}</span><button class="bm-del">✕</button>`;
+    div.querySelector('.bm-del').onclick = e => { e.stopPropagation(); S.bookmarks.splice(realIdx,1); saveBm(); renderBmList(); };
+    div.onclick = () => jumpBm(bm);
+    list.appendChild(div);
+  });
+}
+
+async function jumpBm(bm) {
+  closeModal('bookmark-modal');
+  if (S.curIdx !== bm.bookIdx) await openBook(bm.bookIdx);
+  const p = bm.position;
+  try {
+    if (p.type === 'cfi' && S.rendition) { await S.rendition.display(p.cfi); }
+    else if (p.type === 'page' && S.pdfDoc) { S.pdfPage = p.page; await renderPdfPage(p.page); }
+    else if (p.type === 'scroll') { const v = $('docx-viewer'); const t = v.scrollHeight - v.clientHeight; if (t > 0) v.scrollTop = (p.pct/100)*t; }
+  } catch(e) { console.error('Jump error:', e); }
+}
+
+// ============================================================
+// 9. Jump to position
+// ============================================================
+$('jump-btn').onclick = () => {
+  if (S.curIdx < 0) return;
+  $('jump-page').value = ''; $('jump-pct').value = '';
+  openModal('jump-modal');
+};
+
+$('jump-go').onclick = async () => {
+  const pv = $('jump-page').value, pcv = $('jump-pct').value;
+  if (S.rendition && pcv) {
+    const pct = Math.max(0, Math.min(100, parseInt(pcv))) / 100;
+    try {
+      const epubBook = S.rendition.book;
+      const locs = await epubBook.locations.generate(1000);
+      const idx = Math.floor(pct * locs.length);
+      if (locs[idx]) await S.rendition.display(locs[idx]);
+    } catch(e) { showToast('跳转失败'); }
+  } else if (S.pdfDoc) {
+    const page = pv ? parseInt(pv) : (pcv ? Math.ceil((parseInt(pcv)/100)*S.pdfDoc.numPages) : null);
+    if (page && page >= 1 && page <= S.pdfDoc.numPages) { S.pdfPage = page; await renderPdfPage(page); }
+  } else if (pcv) {
+    const v = $('docx-viewer');
+    const t = v.scrollHeight - v.clientHeight;
+    if (t > 0) v.scrollTop = (parseInt(pcv)/100)*t;
+  }
+  closeModal('jump-modal');
+};
+
+// ============================================================
+// 10. Brightness
+// ============================================================
+$('brightness-overlay').style.opacity = S.brightness / 100;
+$('brightness-btn').onclick = () => {
+  S.brightness = (S.brightness + 15) % 60;
+  localStorage.setItem('pr2_brightness', S.brightness);
+  $('brightness-overlay').style.opacity = S.brightness / 100;
+  showToast('亮度: ' + Math.round(S.brightness/0.6) + '%');
+};
+
+// ============================================================
+// 11. Init
+// ============================================================
+(async function init() {
+  try {
+    const all = await idbAll();
+    S.books = all.map(b => ({ id:b.id, name:b.name, format:b.format, progress:b.progress||0, lastRead:b.lastRead||0, cfi:b.cfi||null }));
+  } catch(e) { console.error(e); }
+  renderBookList();
+})();
+</script>
+</body>
+</html>
